@@ -21,4 +21,9 @@ def get_user_id(email):
     return cursor.execute("select id from users where email like '" + email + "'").fetchval()
 
 
+def select_top(table):
+    return cursor.execute("select top 1 * from " + table).fetchall()
+
+
 print(timestamp() + ' ' + str(get_user_id('clee@itrsgroup.com')))
+print(timestamp() + ' ' + str(select_top('CSP_Question')))
