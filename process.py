@@ -2,8 +2,11 @@ import pyodbc
 import time
 import os
 from openpyxl import load_workbook
+# from openpyxl.utils.cell import column_index_from_string
+# config_column_email = column_index_from_string(config['mandatory_columns']['email'])
 import configparser
 import sys
+import datetime
 
 
 ####################
@@ -177,10 +180,43 @@ def get_survey_type():
         return get_survey_type()
 
 
-def check_spreadsheet_columns(worksheet):  # TODO
-    # mandatory columns must exist
-    # only then should the survey record be added to CSP_Survey table
-    return
+def check_spreadsheet_columns(worksheet):
+    config = configparser.ConfigParser()
+    config.read('spreadsheet_config.ini')
+
+    # check email column contains emails
+    # looks for '@' in the first cell with a value
+    config_column_email = config['mandatory_columns']['email']
+    for row in range(2, worksheet.max_row+1):
+        cell = str(config_column_email) + str(row)
+        value = worksheet[cell].value
+        if value is None:
+            continue
+        if '@' not in value:
+            out('Error: spreadsheet: email column ' + config_column_email + ' does not contain valid emails\n'
+                + 'Cell value: ' + value + '\n'
+                + 'Cell values in this column should contain the "@" symbol\n'
+                + 'Please check that the email column is set correctly in the config file')
+            sys.exit(1)
+        else:  # value contains '@'
+            break
+
+    # check end_date column contains dates
+    # checks data type of first cell with a value
+    config_column_end_date = config['mandatory_columns']['end_date']
+    for row in range(2, worksheet.max_row+1):
+        cell = str(config_column_end_date) + str(row)
+        value = worksheet[cell].value
+        if value is None:
+            continue
+        if not isinstance(value, datetime.date):
+            out('Error: spreadsheet: end_date column ' + config_column_end_date + ' does not contain dates\n'
+                + 'Cell value: ' + value + '\n'
+                + 'Cell values in this column should be a date e.g. "01/09/2016"\n'
+                + 'Please check that the end_date column is set correctly in the config file')
+            sys.exit(1)
+        else:  # value is datetime type
+            break
 
 
 def db_new_survey(file):
@@ -201,15 +237,17 @@ def db_new_survey(file):
 
 check_spreadsheet_config()
 
+# DEVELOPMENT
+path = 'C:\\Users\\slowden\\ITRS Group Ltd\\ITRS Group Ltd Team Site - Intern\\Client Survey Processor\\Input Spreadsheets'
+file = '181018 ITRS Client Survey Analysis Sep18.xlsx'
+workbook = load_workbook(filename=os.path.join(path, file), read_only=True, data_only=True)
+worksheet = workbook.worksheets[8]
+# PRODUCTION
 # path = get_path()
 # file = get_file(path)
 # workbook = load_workbook(filename=os.path.join(path, file), read_only=True, data_only=True)
 # worksheet = get_worksheet(workbook)
 
-# TESTING
-workbook = load_workbook(filename=os.path.join('C:\\Users\\slowden\\ITRS Group Ltd\\ITRS Group Ltd Team Site - Intern\\Client Survey Processor\\Input Spreadsheets','181018 ITRS Client Survey Analysis Sep18.xlsx'), read_only=True, data_only=True)
-worksheet = workbook.worksheets[8]
+check_spreadsheet_columns(worksheet)
 
-# check_spreadsheet_columns(worksheet)
-
-# survey_id = db_new_survey(file)
+survey_id = db_new_survey(file)
