@@ -2,6 +2,8 @@ import pyodbc
 import time
 import os
 from openpyxl import load_workbook
+import configparser
+import sys
 
 
 ####################
@@ -57,6 +59,57 @@ def sql_select_top(table):
 ###################
 # FUNCTIONS: MAIN #
 ###################
+
+def check_spreadsheet_config():
+    # check if config file exists
+    try:
+        f = open('spreadsheet_config.ini')
+    except IOError:
+        out('Error: spreadsheet_config.ini: cannot open file\n'
+            + 'Are you running process.py from the directory containing spreadsheet_config.ini?\n'
+            + 'Please check that spreadsheet_config.ini exists and is named correctly')
+        sys.exit(1)
+    f.close()
+
+    config = configparser.ConfigParser()
+    config.read('spreadsheet_config.ini')
+
+    # check if section exists
+    if 'mandatory_columns' not in config:
+        out('Error: spreadsheet_config.ini: missing section [mandatory_columns]')
+        sys.exit(1)
+
+    # check if keys in section exist
+    if 'email' not in config['mandatory_columns']:
+        out('Error: spreadsheet_config.ini: missing key "email" in section [mandatory_columns]')
+        sys.exit(1)
+    if 'end_date' not in config['mandatory_columns']:
+        out('Error: spreadsheet_config.ini: missing key "end_date" in section [mandatory_columns]')
+        sys.exit(1)
+
+    # check if keys have values
+    if config['mandatory_columns']['email'] == '':
+        out('Error: spreadsheet_config.ini: no value for key "email" in section [mandatory_columns]')
+        sys.exit(1)
+    if config['mandatory_columns']['end_date'] == '':
+        out('Error: spreadsheet_config.ini: no value for key "end_date" in section [mandatory_columns]')
+        sys.exit(1)
+
+    # check if key values are alphabetic only
+    if not config['mandatory_columns']['email'].isalpha():
+        out('Error: spreadsheet_config.ini: non-alphabetic value for key "email" in section [mandatory_columns]\n'
+            + 'Value for "email": ' + config['mandatory_columns']['email'] + '\n'
+            + 'Please enter alphabetic-only values e.g. "AF" to indicate email column')
+        sys.exit(1)
+    if not config['mandatory_columns']['end_date'].isalpha():
+        out('Error: spreadsheet_config.ini: non-alphabetic value for key "end_date" in section [mandatory_columns]\n'
+            + 'Value for "end_date": ' + config['mandatory_columns']['end_date'] + '\n'
+            + 'Please enter alphabetic-only values e.g. "AF" to indicate end_date column')
+        sys.exit(1)
+
+    # config file is fine
+    return
+
 
 def get_path():
     user_input = ask("Enter directory path for survey results files: ")
@@ -124,6 +177,12 @@ def get_survey_type():
         return get_survey_type()
 
 
+def check_spreadsheet_columns(worksheet):  # TODO
+    # mandatory columns must exist
+    # only then should the survey record be added to CSP_Survey table
+    return
+
+
 def db_new_survey(file):
     file_name = file[:len(file) - 5]  # remove .xlsx extension
     survey_type = get_survey_type()
@@ -140,16 +199,17 @@ def db_new_survey(file):
 # MAIN PROGRAM #
 ################
 
-path = get_path()
-file = get_file(path)
-workbook = load_workbook(filename=os.path.join(path, file), read_only=True, data_only=True)
-worksheet = get_worksheet(workbook)
+check_spreadsheet_config()
 
-# TODO check_spreadsheet()
-# spreadsheet_config.ini
-# Python ConfigParser
-# https://www.dev2qa.com/how-to-use-python-configparser-to-read-write-configuration-file/
-# mandatory columns must exist
-# only then should the survey record be added to CSP_Survey table
+# path = get_path()
+# file = get_file(path)
+# workbook = load_workbook(filename=os.path.join(path, file), read_only=True, data_only=True)
+# worksheet = get_worksheet(workbook)
 
-survey_id = db_new_survey(file)
+# TESTING
+workbook = load_workbook(filename=os.path.join('C:\\Users\\slowden\\ITRS Group Ltd\\ITRS Group Ltd Team Site - Intern\\Client Survey Processor\\Input Spreadsheets','181018 ITRS Client Survey Analysis Sep18.xlsx'), read_only=True, data_only=True)
+worksheet = workbook.worksheets[8]
+
+# check_spreadsheet_columns(worksheet)
+
+# survey_id = db_new_survey(file)
