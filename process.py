@@ -40,16 +40,19 @@ def out(msg):
     print(timestamp() + msg)
 
 
-##################
-# FUNCTIONS: SQL #
-##################
+##########################
+# FUNCTIONS: SQL QUERIES #
+##########################
 
 def sql_get_user_id(email):
-    return cursor.execute("select id from Users where email like '" + email + "'").fetchval()
+    user_id = cursor.execute("select id from Users where email like '" + email + "'").fetchval()
+    # user_id = None if no results
+    return user_id
 
 
 def sql_get_last_id(table):
     last_id = cursor.execute("select max(id) from " + table).fetchval()
+    # last_id = None if no results
     if last_id is None:
         return 0
     return last_id
@@ -59,11 +62,59 @@ def sql_select_top(table):
     return cursor.execute("select top 1 * from " + table).fetchall()
 
 
-###################
-# FUNCTIONS: MAIN #
-###################
+###############################
+# FUNCTIONS: DATABASE INSERTS #
+###############################
 
-def check_spreadsheet_config():
+def db_insert_survey(file):
+    file_name = file[:len(file) - 5]  # remove .xlsx extension
+    survey_type = get_survey_type()
+    sql = "insert into CSP_Survey(name, upload_date, type_annual) values (?,getDate(),?)"
+    cursor.execute(sql, (file_name, repr(survey_type)))
+    connection.commit()
+    return sql_get_last_id("CSP_Survey")
+
+
+def db_insert_survey_user(survey_id, user_id, email, end_date):
+    # email does not exist in Users table
+    # user_id will be NULL
+    if user_id is None:
+        sql = "insert into CSP_Survey_User(survey_id, email, end_date) values (?,?,?)"
+        cursor.execute(sql, (repr(survey_id), email, end_date))
+        connection.commit()
+        return sql_get_last_id("CSP_Survey_User")
+
+    # email exists in Users table
+    sql = "insert into CSP_Survey_User(survey_id, user_id, email, end_date) values (?,?,?,?)"
+    cursor.execute(sql, (repr(survey_id), repr(user_id), email, end_date))
+    connection.commit()
+    return sql_get_last_id("CSP_Survey_User")
+
+
+def db_insert_response(survey_user_id, question_id, score, comment):
+    if score is None:
+        sql = "insert into CSP_Response(survey_user_id, question_id, comment) values (?,?,?)"
+        cursor.execute(sql, (repr(survey_user_id), repr(question_id), comment))
+        connection.commit()
+        return sql_get_last_id("CSP_Response")
+    if comment is None:
+        sql = "insert into CSP_Response(survey_user_id, question_id, score) values (?,?,?)"
+        cursor.execute(sql, (repr(survey_user_id), repr(question_id), repr(score)))
+        connection.commit()
+        return sql_get_last_id("CSP_Response")
+
+    # neither score nor comment are None
+    sql = "insert into CSP_Response(survey_user_id, question_id, score, comment) values (?,?,?,?)"
+    cursor.execute(sql, (repr(survey_user_id), repr(question_id), repr(score), comment))
+    connection.commit()
+    return sql_get_last_id("CSP_Response")
+
+
+####################
+# FUNCTIONS: OTHER #
+####################
+
+def check_spreadsheet_config(config):
     # check if config file exists
     try:
         f = open('spreadsheet_config.ini')
@@ -73,9 +124,6 @@ def check_spreadsheet_config():
             + 'Please check that spreadsheet_config.ini exists and is named correctly')
         sys.exit(1)
     f.close()
-
-    config = configparser.ConfigParser()
-    config.read('spreadsheet_config.ini')
 
     # check if section exists
     if 'mandatory_columns' not in config:
@@ -188,8 +236,7 @@ def check_spreadsheet_columns(worksheet):
     # looks for '@' in the first cell with a value
     config_column_email = config['mandatory_columns']['email']
     for row in range(2, worksheet.max_row+1):
-        cell = str(config_column_email) + str(row)
-        value = worksheet[cell].value
+        value = worksheet[str(config_column_email) + str(row)].value
         if value is None:
             continue
         if '@' not in value:
@@ -219,35 +266,73 @@ def check_spreadsheet_columns(worksheet):
             break
 
 
-def db_new_survey(file):
-    file_name = file[:len(file) - 5]  # remove .xlsx extension
-    survey_type = get_survey_type()
-    cursor.execute("insert into CSP_Survey(name, upload_date, type_annual) values (" +
-                   repr(file_name) + ", " +
-                   "getDate()" + ", " +
-                   repr(survey_type) +
-                   ")")
-    connection.commit()
-    return sql_get_last_id("CSP_Survey")
-
-
 ################
 # MAIN PROGRAM #
 ################
 
-check_spreadsheet_config()
+config = configparser.ConfigParser()
+config.read('spreadsheet_config.ini')
+check_spreadsheet_config(config)
 
-# DEVELOPMENT
-path = 'C:\\Users\\slowden\\ITRS Group Ltd\\ITRS Group Ltd Team Site - Intern\\Client Survey Processor\\Input Spreadsheets'
-file = '181018 ITRS Client Survey Analysis Sep18.xlsx'
-workbook = load_workbook(filename=os.path.join(path, file), read_only=True, data_only=True)
-worksheet = workbook.worksheets[8]
 # PRODUCTION
-# path = get_path()
-# file = get_file(path)
+path = get_path()
+file = get_file(path)
+workbook = load_workbook(filename=os.path.join(path, file), read_only=True, data_only=True)
+worksheet = get_worksheet(workbook)
+# DEVELOPMENT
+# path = 'C:\\Users\\slowden\\ITRS Group Ltd\\ITRS Group Ltd Team Site - Intern\\Client Survey Processor\\Input Spreadsheets'
+# file = '181018 ITRS Client Survey Analysis Sep16.xlsx'
 # workbook = load_workbook(filename=os.path.join(path, file), read_only=True, data_only=True)
-# worksheet = get_worksheet(workbook)
+# worksheet = workbook.worksheets[8]
 
 check_spreadsheet_columns(worksheet)
 
-survey_id = db_new_survey(file)
+# CSP_Survey
+survey_id = db_insert_survey(file)
+
+# process all rows in spreadsheet
+config_column_email = config['mandatory_columns']['email']
+config_column_end_date = config['mandatory_columns']['end_date']
+for row in range(2, worksheet.max_row+1):
+
+    # CSP_Survey_User
+    email = worksheet[str(config_column_email) + str(row)].value
+    out(f'Processing {str(row)} of {worksheet.max_row} for {email}')
+    if email is None:
+        continue
+    user_id = sql_get_user_id(email)
+    end_date = worksheet[str(config_column_end_date) + str(row)].value
+    survey_user_id = db_insert_survey_user(survey_id, user_id, email, end_date)
+
+    # CSP_Response
+    for i in range(1, sql_get_last_id('CSP_Question')+1):
+        if str(i) not in config:
+            # Question i does not exist as section in config file
+            continue
+
+        config_column_score = config[str(i)]['score']
+        config_column_comment = config[str(i)]['comment']
+        if config_column_score == str(0) and config_column_comment == str(0):
+            # Question i not included in survey
+            continue
+        if config_column_score == str(0):
+            score = None
+            comment = worksheet[str(config_column_comment) + str(row)].value
+        elif config_column_comment == str(0):
+            score = worksheet[str(config_column_score) + str(row)].value
+            comment = None
+        else:
+            score = worksheet[str(config_column_score) + str(row)].value
+            comment = worksheet[str(config_column_comment) + str(row)].value
+
+        # if value for score is non-numeric
+        if score is not None:
+            try:
+                int(score)
+            except ValueError:
+                score = None
+
+        db_insert_response(survey_user_id, i, score, comment)
+
+print()
+out(f'{file} has been processed.')
