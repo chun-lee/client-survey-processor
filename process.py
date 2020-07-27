@@ -7,6 +7,7 @@ from openpyxl import load_workbook
 import configparser
 import sys
 import datetime
+from datetime import datetime as dt
 
 
 ####################
@@ -77,8 +78,8 @@ def db_insert_survey(file):
 
 def db_insert_survey_user(survey_id, user_id, email, end_date):
     # email does not exist in Users table
-    # user_id will be NULL
     if user_id is None:
+        # user_id will be NULL
         sql = "insert into CSP_Survey_User(survey_id, email, end_date) values (?,?,?)"
         cursor.execute(sql, (repr(survey_id), email, end_date))
         connection.commit()
@@ -102,7 +103,6 @@ def db_insert_response(survey_user_id, question_id, score, comment):
         cursor.execute(sql, (repr(survey_user_id), repr(question_id), repr(score)))
         connection.commit()
         return sql_get_last_id("CSP_Response")
-
     # neither score nor comment are None
     sql = "insert into CSP_Response(survey_user_id, question_id, score, comment) values (?,?,?,?)"
     cursor.execute(sql, (repr(survey_user_id), repr(question_id), repr(score), comment))
@@ -114,7 +114,7 @@ def db_insert_response(survey_user_id, question_id, score, comment):
 # FUNCTIONS: OTHER #
 ####################
 
-def check_spreadsheet_config(config):
+def check_config(config):
     # check if config file exists
     try:
         f = open('spreadsheet_config.ini')
@@ -236,16 +236,20 @@ def check_spreadsheet_columns(worksheet):
     # looks for '@' in the first cell with a value
     config_column_email = config['mandatory_columns']['email']
     for row in range(2, worksheet.max_row+1):
-        value = worksheet[str(config_column_email) + str(row)].value
+        cell = str(config_column_email) + str(row)
+        value = worksheet[cell].value
+
         if value is None:
             continue
+
         if '@' not in value:
             out('Error: spreadsheet: email column ' + config_column_email + ' does not contain valid emails\n'
                 + 'Cell value: ' + value + '\n'
                 + 'Cell values in this column should contain the "@" symbol\n'
                 + 'Please check that the email column is set correctly in the config file')
             sys.exit(1)
-        else:  # value contains '@'
+
+        else:  # '@' in value
             break
 
     # check end_date column contains dates
@@ -254,15 +258,41 @@ def check_spreadsheet_columns(worksheet):
     for row in range(2, worksheet.max_row+1):
         cell = str(config_column_end_date) + str(row)
         value = worksheet[cell].value
+
         if value is None:
             continue
+
+        if isinstance(value, str):
+            if "AM" in value or "PM" in value:
+                # format: MM/DD/YYYY HH:MM:SS AM/PM (081119 ITRS Client Survey Analysis Oct 19.xlsx)
+                try:
+                    value = value[:len(value) - 3]  # remove AM/PM
+                    value = dt.strptime(value, '%m/%d/%Y %H:%M:%S')
+                except:
+                    out(
+                        'Error: spreadsheet: end_date column ' + config_column_end_date + ' does not contain valid dates\n'
+                        + 'Cell value: ' + value + '\n'
+                        + 'Please check that the end_date column is set correctly in the config file')
+                    sys.exit(1)
+
+            else:  # AM/PM not in value
+                # format: DD/MM/YYYY HH:MM (200723 client_survey annual survey week 1-3.xlsx)
+                try:
+                    value += ':00'  # append seconds
+                    value = dt.strptime(value, '%d/%m/%Y %H:%M:%S')
+                except:
+                    out('Error: spreadsheet: end_date column ' + config_column_end_date + ' does not contain valid dates\n'
+                        + 'Cell value: ' + value + '\n'
+                        + 'Please check that the end_date column is set correctly in the config file')
+                    sys.exit(1)
+
         if not isinstance(value, datetime.date):
-            out('Error: spreadsheet: end_date column ' + config_column_end_date + ' does not contain dates\n'
+            out('Error: spreadsheet: end_date column ' + config_column_end_date + ' does not contain valid dates\n'
                 + 'Cell value: ' + value + '\n'
-                + 'Cell values in this column should be a date e.g. "01/09/2016"\n'
                 + 'Please check that the end_date column is set correctly in the config file')
             sys.exit(1)
-        else:  # value is datetime type
+
+        else:
             break
 
 
@@ -272,39 +302,69 @@ def check_spreadsheet_columns(worksheet):
 
 config = configparser.ConfigParser()
 config.read('spreadsheet_config.ini')
-check_spreadsheet_config(config)
+check_config(config)
 
+# DEVELOPMENT
+# path = 'C:\\Users\\slowden\\ITRS Group Ltd\\ITRS Group Ltd Team Site - Intern\\Client Survey Processor\\Input Spreadsheets'
+# file = '181018 ITRS Client Survey Analysis Sep18.xlsx'
+# workbook = load_workbook(filename=os.path.join(path, file), read_only=True, data_only=True)
+# worksheet = workbook.worksheets[8]
 # PRODUCTION
 path = get_path()
 file = get_file(path)
 workbook = load_workbook(filename=os.path.join(path, file), read_only=True, data_only=True)
 worksheet = get_worksheet(workbook)
-# DEVELOPMENT
-# path = 'C:\\Users\\slowden\\ITRS Group Ltd\\ITRS Group Ltd Team Site - Intern\\Client Survey Processor\\Input Spreadsheets'
-# file = '181018 ITRS Client Survey Analysis Sep16.xlsx'
-# workbook = load_workbook(filename=os.path.join(path, file), read_only=True, data_only=True)
-# worksheet = workbook.worksheets[8]
 
 check_spreadsheet_columns(worksheet)
 
-# CSP_Survey
+##############
+# CSP_Survey #
+##############
 survey_id = db_insert_survey(file)
 
-# process all rows in spreadsheet
+# process spreadsheet row by row
 config_column_email = config['mandatory_columns']['email']
 config_column_end_date = config['mandatory_columns']['end_date']
 for row in range(2, worksheet.max_row+1):
 
-    # CSP_Survey_User
+    ###################
+    # CSP_Survey_User #
+    ###################
     email = worksheet[str(config_column_email) + str(row)].value
-    out(f'Processing {str(row)} of {worksheet.max_row} for {email}')
     if email is None:
+        out(f'Processing row [{str(row)} of {worksheet.max_row}] {email} - skipping')
         continue
+    out(f'Processing row [{str(row)} of {worksheet.max_row}] {email}')
     user_id = sql_get_user_id(email)
+
+    # date transformations
     end_date = worksheet[str(config_column_end_date) + str(row)].value
+    if isinstance(end_date, str):
+        if "AM" in end_date or "PM" in end_date:
+            # MM/DD/YYYY HH:MM:SS AM/PM
+            # 081119 ITRS Client Survey Analysis Oct 19.xlsx
+            end_date = end_date[:len(end_date) - 3]  # remove AM/PM
+            end_date = dt.strptime(end_date, '%m/%d/%Y %H:%M:%S')
+        else:
+            # DD/MM/YYYY HH:MM
+            # 200723 client_survey annual survey week 1-3.xlsx
+            end_date += ':00'  # append empty seconds
+            end_date = dt.strptime(end_date, '%d/%m/%Y %H:%M:%S')
+    else:
+        if (end_date.hour + end_date.minute + end_date.second) != 0:
+            # MM/DD/YYYY HH:MM:SS
+            # 081119 ITRS Client Survey Analysis Oct 19.xlsx
+            end_date = dt.strptime(str(end_date), '%Y-%d-%m %H:%M:%S')
+        else:
+            # DD/MM/YYYY
+            # 181018 ITRS Client Survey Analysis Sep18.xlsx
+            end_date = dt.strptime(str(end_date), '%Y-%m-%d %H:%M:%S')
+
     survey_user_id = db_insert_survey_user(survey_id, user_id, email, end_date)
 
-    # CSP_Response
+    ################
+    # CSP_Response #
+    ################
     for i in range(1, sql_get_last_id('CSP_Question')+1):
         if str(i) not in config:
             # Question i does not exist as section in config file
