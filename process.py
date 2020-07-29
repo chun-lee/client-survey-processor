@@ -9,7 +9,6 @@ import sys
 import datetime
 from datetime import datetime as dt
 
-
 ####################
 # CONFIG: DATABASE #
 ####################
@@ -137,25 +136,42 @@ def check_config(config):
     if 'end_date' not in config['mandatory_columns']:
         out('Error: spreadsheet_config.ini: missing key "end_date" in section [mandatory_columns]')
         sys.exit(1)
+    if 'end_date_format' not in config['mandatory_columns']:
+        out('Error: spreadsheet_config.ini: missing key "end_date_format" in section [mandatory_columns]')
+        sys.exit(1)
+
+    email = config['mandatory_columns']['email']
+    end_date = config['mandatory_columns']['end_date']
+    end_date_format = config['mandatory_columns']['end_date_format']
 
     # check if keys have values
-    if config['mandatory_columns']['email'] == '':
+    if email == '':
         out('Error: spreadsheet_config.ini: no value for key "email" in section [mandatory_columns]')
         sys.exit(1)
-    if config['mandatory_columns']['end_date'] == '':
+    if end_date == '':
         out('Error: spreadsheet_config.ini: no value for key "end_date" in section [mandatory_columns]')
+        sys.exit(1)
+    if end_date_format == '':
+        out('Error: spreadsheet_config.ini: no value for key "end_date_format" in section [mandatory_columns]')
         sys.exit(1)
 
     # check if key values are alphabetic only
-    if not config['mandatory_columns']['email'].isalpha():
+    if not email.isalpha():
         out('Error: spreadsheet_config.ini: non-alphabetic value for key "email" in section [mandatory_columns]\n'
-            + 'Value for "email": ' + config['mandatory_columns']['email'] + '\n'
+            + 'Value for "email": ' + email + '\n'
             + 'Please enter alphabetic-only values e.g. "AF" to indicate email column')
         sys.exit(1)
-    if not config['mandatory_columns']['end_date'].isalpha():
+    if not end_date.isalpha():
         out('Error: spreadsheet_config.ini: non-alphabetic value for key "end_date" in section [mandatory_columns]\n'
-            + 'Value for "end_date": ' + config['mandatory_columns']['end_date'] + '\n'
+            + 'Value for "end_date": ' + end_date + '\n'
             + 'Please enter alphabetic-only values e.g. "AF" to indicate end_date column')
+        sys.exit(1)
+
+    # check if end_date_format is valid
+    if not (end_date_format == 'UK' or end_date_format == 'US'):
+        out('Error: spreadsheet_config.ini: invalid value for key "end_date_format" in section [mandatory_columns]\n'
+            + 'Value for "end_date_format": ' + end_date_format + '\n'
+            + 'Please enter either "UK" or "US"')
         sys.exit(1)
 
     # config file is fine
@@ -235,7 +251,7 @@ def check_spreadsheet_columns(worksheet):
     # check email column contains emails
     # looks for '@' in the first cell with a value
     config_column_email = config['mandatory_columns']['email']
-    for row in range(2, worksheet.max_row+1):
+    for row in range(2, worksheet.max_row + 1):
         cell = str(config_column_email) + str(row)
         value = worksheet[cell].value
 
@@ -255,7 +271,7 @@ def check_spreadsheet_columns(worksheet):
     # check end_date column contains dates
     # checks data type of first cell with a value
     config_column_end_date = config['mandatory_columns']['end_date']
-    for row in range(2, worksheet.max_row+1):
+    for row in range(2, worksheet.max_row + 1):
         cell = str(config_column_end_date) + str(row)
         value = worksheet[cell].value
 
@@ -275,17 +291,6 @@ def check_spreadsheet_columns(worksheet):
                         + 'Please check that the end_date column is set correctly in the config file')
                     sys.exit(1)
 
-            else:  # AM/PM not in value
-                # format: DD/MM/YYYY HH:MM (200723 client_survey annual survey week 1-3.xlsx)
-                try:
-                    value += ':00'  # append seconds
-                    value = dt.strptime(value, '%d/%m/%Y %H:%M:%S')
-                except:
-                    out('Error: spreadsheet: end_date column ' + config_column_end_date + ' does not contain valid dates\n'
-                        + 'Cell value: ' + value + '\n'
-                        + 'Please check that the end_date column is set correctly in the config file')
-                    sys.exit(1)
-
         if not isinstance(value, datetime.date):
             out('Error: spreadsheet: end_date column ' + config_column_end_date + ' does not contain valid dates\n'
                 + 'Cell value: ' + value + '\n'
@@ -294,6 +299,13 @@ def check_spreadsheet_columns(worksheet):
 
         else:
             break
+
+
+def convert_score(score):
+    if score == 0:
+        return 0
+    else:
+        return (score * 2) + 2
 
 
 ################
@@ -306,9 +318,9 @@ check_config(config)
 
 # DEVELOPMENT
 # path = 'C:\\Users\\slowden\\ITRS Group Ltd\\ITRS Group Ltd Team Site - Intern\\Client Survey Processor\\Input Spreadsheets'
-# file = '181018 ITRS Client Survey Analysis Sep18.xlsx'
+# file = '200729 client_survey annual survey week 1-4.xlsx'
 # workbook = load_workbook(filename=os.path.join(path, file), read_only=True, data_only=True)
-# worksheet = workbook.worksheets[8]
+# worksheet = workbook.worksheets[0]
 # PRODUCTION
 path = get_path()
 file = get_file(path)
@@ -325,7 +337,8 @@ survey_id = db_insert_survey(file)
 # process spreadsheet row by row
 config_column_email = config['mandatory_columns']['email']
 config_column_end_date = config['mandatory_columns']['end_date']
-for row in range(2, worksheet.max_row+1):
+config_end_date_format = config['mandatory_columns']['end_date_format']
+for row in range(2, worksheet.max_row + 1):
 
     ###################
     # CSP_Survey_User #
@@ -345,50 +358,53 @@ for row in range(2, worksheet.max_row+1):
             # 081119 ITRS Client Survey Analysis Oct 19.xlsx
             end_date = end_date[:len(end_date) - 3]  # remove AM/PM
             end_date = dt.strptime(end_date, '%m/%d/%Y %H:%M:%S')
-        else:
+        else:  # no seconds in end_date
             # DD/MM/YYYY HH:MM
             # 200723 client_survey annual survey week 1-3.xlsx
             end_date += ':00'  # append empty seconds
             end_date = dt.strptime(end_date, '%d/%m/%Y %H:%M:%S')
     else:
-        if (end_date.hour + end_date.minute + end_date.second) != 0:
+        if config_end_date_format == 'UK':
+            # DD/MM/YYYY HH:MM:SS
+            # 200729 client_survey annual survey week 1-4.xlsx
+            end_date = dt.strptime(str(end_date), '%Y-%m-%d %H:%M:%S')
+        else:  # config_end_date_format == 'US'
             # MM/DD/YYYY HH:MM:SS
             # 081119 ITRS Client Survey Analysis Oct 19.xlsx
             end_date = dt.strptime(str(end_date), '%Y-%d-%m %H:%M:%S')
-        else:
-            # DD/MM/YYYY
-            # 181018 ITRS Client Survey Analysis Sep18.xlsx
-            end_date = dt.strptime(str(end_date), '%Y-%m-%d %H:%M:%S')
 
     survey_user_id = db_insert_survey_user(survey_id, user_id, email, end_date)
 
     ################
     # CSP_Response #
     ################
-    for i in range(1, sql_get_last_id('CSP_Question')+1):
+    for i in range(1, sql_get_last_id('CSP_Question') + 1):
         if str(i) not in config:
             # Question i does not exist as section in config file
             continue
 
+        config_score_max = config[str(i)]['score_max']
         config_column_score = config[str(i)]['score']
         config_column_comment = config[str(i)]['comment']
-        if config_column_score == str(0) and config_column_comment == str(0):
+
+        if config_column_score == '0' and config_column_comment == '0':
             # Question i not included in survey
             continue
-        if config_column_score == str(0):
+        elif config_column_score == '0':
             score = None
             comment = worksheet[str(config_column_comment) + str(row)].value
-        elif config_column_comment == str(0):
+        elif config_column_comment == '0':
             score = worksheet[str(config_column_score) + str(row)].value
             comment = None
         else:
             score = worksheet[str(config_column_score) + str(row)].value
             comment = worksheet[str(config_column_comment) + str(row)].value
 
-        # if value for score is non-numeric
         if score is not None:
             try:
-                int(score)
+                score = int(score)
+                if config_score_max == '4':
+                    score = convert_score(score)
             except ValueError:
                 score = None
 
