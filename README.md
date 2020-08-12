@@ -40,7 +40,7 @@ If the setup was successful, you should see the following message:
 
     Enter directory path for survey results files:
 
-### Usage
+### Running CSP
 
 1\. Open spreadsheet_config.ini and edit the values according to your Client Survey results spreadsheet. Save and close both documents.
 
